@@ -3,7 +3,7 @@
 #ifdef UNICODE
 typedef  fstream tfstream;
 #else
-typedef wfstream twfstream;
+typedef wfstream tfstream;
 #endif // UNICODE
 
 
@@ -44,6 +44,8 @@ public:
 	bool Load(LPCTSTR szFile);
 	bool Save(LPCTSTR szFile);
 	bool AddCode(byte* pCode, DWORD dwSize);
+	bool AddImportTable(LPCSTR szDllName, LPCSTR szFunName);
+	bool IsX64();
 	DWORD Rva2Fva(DWORD dwRva);
 	DWORD AlignUp(DWORD x, DWORD v);
 };

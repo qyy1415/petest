@@ -56,8 +56,6 @@ bool CPEUtil::AddCode(byte * pCode, DWORD dwSize)
 	DWORD dwBase = 0;
 	auto pSec = IMAGE_FIRST_SECTION(h.pNTHeader);
 
-	if (h.pNTHeader->FileHeader.Machine != IMAGE_FILE_MACHINE_I386)
-		return false;
 	// ’“ø’œ∂
 	for (size_t i = 0; i < h.pNTHeader->FileHeader.NumberOfSections; i++, pSec++)
 	{
@@ -99,6 +97,81 @@ bool CPEUtil::AddCode(byte * pCode, DWORD dwSize)
 	h.pNTHeader->OptionalHeader.AddressOfEntryPoint = dwBase;
 
 	return true;
+}
+
+bool CPEUtil::AddImportTable(LPCSTR szDllName, LPCSTR szFunName)
+{
+	DWORD dwNeedSize = 0;
+	CHeader h(&m_vBuf[0]);
+
+	dwNeedSize = h.pOp->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size + sizeof(IMAGE_IMPORT_DESCRIPTOR);
+	dwNeedSize += strlen(szDllName) + 1;
+	dwNeedSize += sizeof(IMAGE_THUNK_DATA) * 2 * 2;
+	dwNeedSize += sizeof(IMAGE_IMPORT_BY_NAME) + strlen(szFunName);
+
+	auto pSec = IMAGE_FIRST_SECTION(h.pNTHeader);
+	DWORD dwBase = 0;
+	for (size_t i = 0; i < h.pNTHeader->FileHeader.NumberOfSections ; i++, pSec++)
+	{
+		if (pSec->SizeOfRawData > 0 &&
+			pSec->SizeOfRawData >= (pSec->Misc.VirtualSize + dwNeedSize))
+		{
+			dwBase = pSec->VirtualAddress + pSec->Misc.VirtualSize;
+			break;
+		}
+	}
+	if (!dwBase) // not enough space, so add a new section
+	{
+		vector<byte> tmpCode(dwNeedSize, 0);
+		AddCode(tmpCode.data(), dwNeedSize);
+		h.Reset(&m_vBuf[0]);
+		pSec = IMAGE_FIRST_SECTION(h.pNTHeader) + h.pNTHeader->FileHeader.NumberOfSections-1;
+		dwBase = pSec->VirtualAddress;
+		pSec->Misc.VirtualSize = 0;
+		pSec->Characteristics |= IMAGE_SCN_MEM_WRITE;
+	}
+	vector<char> szBuf(dwNeedSize, 0);
+	DWORD dwPos = 0;
+	PIMAGE_IMPORT_DESCRIPTOR pDes = (PIMAGE_IMPORT_DESCRIPTOR)(m_vBuf.data()+Rva2Fva(h.pOp->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress));
+	memcpy(szBuf.data(), pDes, h.pOp->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size);
+	PIMAGE_IMPORT_DESCRIPTOR pBgn = pDes;
+	for (; pDes->Characteristics; pDes++)
+	{
+		if (0 == strcmp(m_vBuf.data() + Rva2Fva(pDes->Name), szDllName))
+			return false; // already exist
+	}
+	dwPos += DWORD(pDes - pBgn)*sizeof(IMAGE_IMPORT_DESCRIPTOR);
+	pDes = (PIMAGE_IMPORT_DESCRIPTOR)&szBuf[dwPos];
+	dwPos += sizeof(IMAGE_IMPORT_DESCRIPTOR) * 2;
+	char* szdll = &szBuf[dwPos];
+	strcpy_s(szdll, strlen(szDllName)+1, szDllName);
+	pDes->Name = dwBase + DWORD(szdll - szBuf.data());
+	dwPos += strlen(szdll) + 1;
+	pDes->OriginalFirstThunk = dwBase + dwPos;
+	PIMAGE_THUNK_DATA pThunk = (PIMAGE_THUNK_DATA)&szBuf[dwPos];
+	pDes->FirstThunk =h.pOp->DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT].VirtualAddress + h.pOp->DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT].Size; // pDes->OriginalFirstThunk + sizeof(IMAGE_THUNK_DATA) * 2; //
+	dwPos += sizeof(IMAGE_THUNK_DATA) * 4;
+	pThunk->u1.AddressOfData = dwBase + dwPos;
+	pThunk += 2;
+	pThunk->u1.AddressOfData = dwBase + dwPos;
+
+	PIMAGE_IMPORT_BY_NAME pImp = (PIMAGE_IMPORT_BY_NAME)&szBuf[dwPos];
+	pImp->Hint = 0;
+	strcpy_s(pImp->Name, strlen(szFunName)+1, szFunName);
+
+	memcpy(m_vBuf.data()+Rva2Fva(dwBase), &szBuf[0], dwNeedSize);
+	pSec->Misc.VirtualSize += dwNeedSize;
+	h.pOp->DataDirectory[IMAGE_DIRECTORY_ENTRY_IAT].Size += sizeof(IMAGE_THUNK_DATA)*2;
+	h.pOp->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].Size += sizeof(IMAGE_IMPORT_DESCRIPTOR);
+	h.pOp->DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress = dwBase;
+
+	return true;
+}
+
+bool CPEUtil::IsX64()
+{
+	CHeader h(&m_vBuf[0]);
+	return h.pNTHeader->FileHeader.Machine != IMAGE_FILE_MACHINE_I386;
 }
 
 DWORD CPEUtil::Rva2Fva(DWORD dwRva)

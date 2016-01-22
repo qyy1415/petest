@@ -114,7 +114,8 @@ int main(int argc, const char** argv)
 
 	if (peUtil.Load(CA2T(argv[1])))
 	{
-		peUtil.AddCode(a_code, sizeof(a_code));
+		//peUtil.AddCode(a_code, sizeof(a_code));
+		peUtil.AddImportTable("load.dll", "DoAction");
 		cout << "add result: " << peUtil.Save(_T("new.add.exe")) << endl;
 	}
 	else
